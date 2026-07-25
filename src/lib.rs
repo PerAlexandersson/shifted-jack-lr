@@ -7,6 +7,9 @@ use num_integer::Integer;
 use num_rational::Ratio;
 use num_traits::{One, Signed, Zero};
 
+pub mod brute_force;
+pub mod macdonald;
+
 type Rat = Ratio<BigInt>;
 
 /// A partition, stored in weakly decreasing order.
@@ -70,7 +73,7 @@ impl IntPoly {
         }
     }
 
-    fn coeff(&self, degree: usize) -> BigInt {
+    pub(crate) fn coeff(&self, degree: usize) -> BigInt {
         self.coeffs
             .get(degree)
             .cloned()
@@ -81,7 +84,7 @@ impl IntPoly {
         self.coeffs.last().expect("nonzero polynomial")
     }
 
-    fn content_abs(&self) -> BigInt {
+    pub(crate) fn content_abs(&self) -> BigInt {
         self.coeffs
             .iter()
             .fold(BigInt::zero(), |acc, c| acc.gcd(&c.abs()))
@@ -101,7 +104,7 @@ impl IntPoly {
         )
     }
 
-    fn primitive_part_positive(&self) -> Self {
+    pub(crate) fn primitive_part_positive(&self) -> Self {
         if self.is_zero() {
             return Self::zero();
         }
@@ -113,7 +116,7 @@ impl IntPoly {
         result
     }
 
-    fn exact_div(&self, divisor: &Self) -> Self {
+    pub(crate) fn exact_div(&self, divisor: &Self) -> Self {
         assert!(!divisor.is_zero(), "division by zero polynomial");
         let (quotient, remainder) = rat_poly_div_rem(
             int_poly_to_rat_coeffs(self),
@@ -282,6 +285,14 @@ impl RationalFunction {
 
     pub fn is_zero(&self) -> bool {
         self.numerator.is_zero()
+    }
+
+    pub(crate) fn numerator(&self) -> &IntPoly {
+        &self.numerator
+    }
+
+    pub(crate) fn denominator(&self) -> &IntPoly {
+        &self.denominator
     }
 
     pub fn inverse(self) -> Self {
@@ -679,7 +690,7 @@ fn is_partition(partition: &[usize]) -> bool {
     partition.windows(2).all(|w| w[0] >= w[1])
 }
 
-fn trim_partition(partition: &[usize]) -> Partition {
+pub(crate) fn trim_partition(partition: &[usize]) -> Partition {
     let mut result = partition.to_vec();
     while result.last().is_some_and(|part| *part == 0) {
         result.pop();
@@ -687,7 +698,7 @@ fn trim_partition(partition: &[usize]) -> Partition {
     result
 }
 
-fn normalize_two(a: &[usize], b: &[usize]) -> [Partition; 2] {
+pub(crate) fn normalize_two(a: &[usize], b: &[usize]) -> [Partition; 2] {
     let len = a.len().max(b.len());
     let mut aa = a.to_vec();
     let mut bb = b.to_vec();
@@ -696,7 +707,7 @@ fn normalize_two(a: &[usize], b: &[usize]) -> [Partition; 2] {
     [aa, bb]
 }
 
-fn normalize_three(a: &[usize], b: &[usize], c: &[usize]) -> [Partition; 3] {
+pub(crate) fn normalize_three(a: &[usize], b: &[usize], c: &[usize]) -> [Partition; 3] {
     let len = a.len().max(b.len()).max(c.len());
     let mut aa = a.to_vec();
     let mut bb = b.to_vec();
@@ -707,12 +718,12 @@ fn normalize_three(a: &[usize], b: &[usize], c: &[usize]) -> [Partition; 3] {
     [aa, bb, cc]
 }
 
-fn skew_shape_contains(outer: &[usize], inner: &[usize]) -> bool {
+pub(crate) fn skew_shape_contains(outer: &[usize], inner: &[usize]) -> bool {
     let [outer, inner] = normalize_two(outer, inner);
     outer.iter().zip(inner.iter()).all(|(o, i)| o >= i)
 }
 
-fn conjugate_partition(partition: &[usize]) -> Partition {
+pub(crate) fn conjugate_partition(partition: &[usize]) -> Partition {
     let partition = trim_partition(partition);
     let Some(&width) = partition.first() else {
         return Vec::new();
@@ -722,7 +733,7 @@ fn conjugate_partition(partition: &[usize]) -> Partition {
         .collect()
 }
 
-fn add_box_to_partition(mu_in: &[usize]) -> Vec<Partition> {
+pub(crate) fn add_box_to_partition(mu_in: &[usize]) -> Vec<Partition> {
     let mut mu = if mu_in.is_empty() {
         vec![0]
     } else {
@@ -747,7 +758,7 @@ fn add_box_to_partition(mu_in: &[usize]) -> Vec<Partition> {
     out
 }
 
-fn remove_box_from_partition(mu_in: &[usize]) -> Vec<Partition> {
+pub(crate) fn remove_box_from_partition(mu_in: &[usize]) -> Vec<Partition> {
     let mut mu = mu_in.to_vec();
     let mut bot: Partition = mu.iter().map(|part| part.saturating_sub(1)).collect();
     let len = mu.len().max(bot.len());
@@ -833,7 +844,7 @@ fn b_factor(parameter: &RationalFunction, arm: i64, leg: i64) -> RationalFunctio
     numerator / denominator
 }
 
-fn semistandard_tableaux(shape: &[usize], max_entry: usize) -> Vec<Vec<Vec<usize>>> {
+pub(crate) fn semistandard_tableaux(shape: &[usize], max_entry: usize) -> Vec<Vec<Vec<usize>>> {
     if shape.is_empty() {
         return vec![Vec::new()];
     }
@@ -876,7 +887,7 @@ fn fill_tableaux(
     }
 }
 
-fn gt_chain_from_tableau(
+pub(crate) fn gt_chain_from_tableau(
     tableau: &[Vec<usize>],
     shape: &[usize],
     max_entry: usize,
@@ -931,7 +942,7 @@ fn rat_poly_div_rem(mut dividend: Vec<Rat>, divisor: Vec<Rat>) -> (Vec<Rat>, Vec
     (quotient, dividend)
 }
 
-fn int_poly_gcd(a: &IntPoly, b: &IntPoly) -> IntPoly {
+pub(crate) fn int_poly_gcd(a: &IntPoly, b: &IntPoly) -> IntPoly {
     if a.is_zero() {
         return b.primitive_part_positive();
     }
