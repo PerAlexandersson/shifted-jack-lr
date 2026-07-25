@@ -505,6 +505,8 @@ pub mod gcd_stats {
         pub(super) static WORST: Cell<(usize, usize, u128)> = const { Cell::new((0, 0, 0)) };
     }
 
+    /// Zeroes the counters (thread-local, like all state in this module --
+    /// call this on the same thread that will do the work being measured).
     pub fn reset() {
         CALLS.with(|c| c.set(0));
         NANOS.with(|c| c.set(0));
@@ -513,6 +515,8 @@ pub mod gcd_stats {
         WORST.with(|c| c.set((0, 0, 0)));
     }
 
+    /// A human-readable summary of the counters accumulated on this thread
+    /// since the last `reset`.
     pub fn report() -> String {
         let calls = CALLS.with(|c| c.get());
         let nanos = NANOS.with(|c| c.get());
@@ -542,6 +546,9 @@ pub mod gcd_stats {
     }
 }
 
+/// Thin profiling wrapper around `poly2_gcd_inner` (the actual gcd
+/// algorithm): records call counts/timings into `gcd_stats` when enabled,
+/// otherwise adds nothing over calling it directly.
 fn poly2_gcd(a: &Poly2, b: &Poly2) -> Poly2 {
     static STATS_ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *STATS_ENABLED.get_or_init(|| std::env::var_os("MACDONALD_GCD_STATS").is_some()) {
@@ -581,6 +588,8 @@ fn poly2_gcd(a: &Poly2, b: &Poly2) -> Poly2 {
 /// u128 and residues fit in u64.
 const GCD_FILTER_PRIME: u64 = 2_147_483_647;
 
+/// `x mod p`, normalized into `0..p` (BigInt's `%` can return a negative
+/// remainder for a negative `x`).
 fn bigint_mod_u64(x: &BigInt, p: u64) -> u64 {
     let modulus = BigInt::from(p);
     let mut r = x % &modulus;
@@ -603,6 +612,7 @@ fn eval_intpoly_mod(poly: &IntPoly, t0: u64, p: u64) -> u64 {
     acc
 }
 
+/// `base^exponent mod p`, via square-and-multiply.
 fn mod_pow(mut base: u64, mut exponent: u64, p: u64) -> u64 {
     let mut result = 1u64;
     base %= p;
@@ -616,6 +626,8 @@ fn mod_pow(mut base: u64, mut exponent: u64, p: u64) -> u64 {
     result
 }
 
+/// Drops trailing zero coefficients, the F_p analog of `Poly2::new`'s
+/// leading-zero trim.
 fn trim_mod_poly(v: &mut Vec<u64>) {
     while v.last() == Some(&0) {
         v.pop();
@@ -781,6 +793,10 @@ fn strip_common_q_power(a_star: &mut Poly2, b_star: &mut Poly2) -> usize {
     k
 }
 
+/// Euler's totient function, via trial division over d's prime factors.
+/// Used to bound a cyclotomic factor's q-degree during the search in
+/// `strip_common_cyclotomic_factors` (`deg Phi_d(q^alpha t^beta) = alpha *
+/// phi(d)`).
 fn euler_phi(mut d: usize) -> usize {
     let mut result = d;
     let mut factor = 2;

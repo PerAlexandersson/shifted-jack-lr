@@ -1,22 +1,37 @@
-//! A completely independent "brute force" computation of ordinary Macdonald
-//! P-basis structure constants, for cross-checking [`crate::macdonald`]'s
-//! interpolation/shifted-theory-based algorithms. Shares no code with them
-//! beyond basic partition combinatorics and the `Poly2`/`RationalFunction2`
-//! number types -- reuses none of `adjacent_binomial_coefficient`,
-//! `normalizing_factor`, `shifted_macdonald_evaluate`, etc.
+//! Independent computations of ordinary Macdonald P-basis structure
+//! constants, for cross-checking [`crate::macdonald`]'s interpolation
+//! /shifted-theory-based algorithms. Shares no code with them beyond basic
+//! partition combinatorics and the `Poly2`/`RationalFunction2` number types
+//! -- reuses none of `adjacent_binomial_coefficient`, `normalizing_factor`,
+//! `shifted_macdonald_evaluate`, etc. Three algorithms live here:
 //!
-//! Strategy: work entirely in the power-sum basis, where multiplication is
-//! trivial (`p_lambda * p_mu = p_{lambda merged with mu}`) and the Macdonald
-//! inner product is diagonal (`<p_lambda, p_mu> = delta * z_lambda(q,t)`).
-//! Build each P_lambda via Gram-Schmidt starting from m_lambda's power-sum
-//! expansion (obtained via plain rational linear algebra -- evaluate both
-//! bases at several integer points and solve the resulting system exactly
-//! over Q -- rather than recalling/re-deriving a combinatorial transition
-//! formula from memory). Then:
+//! [`brute_force_structure_constant`]: work entirely in the power-sum
+//! basis, where multiplication is trivial (`p_lambda * p_mu =
+//! p_{lambda merged with mu}`) and the Macdonald inner product is diagonal
+//! (`<p_lambda, p_mu> = delta * z_lambda(q,t)`). Build each P_lambda via
+//! Gram-Schmidt starting from m_lambda's power-sum expansion, then
 //!
 //!   c^nu_{lambda,mu} = <P_lambda * P_mu, Q_nu> = <P_lambda * P_mu, P_nu> / <P_nu, P_nu>
 //!
 //! using Q_nu = P_nu / <P_nu,P_nu> (from <P_nu,Q_nu> = 1).
+//!
+//! [`schur_sandwich_structure_constant`]: the same Gram-Schmidt P_lambda,
+//! P_mu, P_nu, but multiplied by converting to the Schur basis and using
+//! the classical INTEGER Littlewood-Richardson coefficients (no q,t
+//! arithmetic in that step) rather than merging power-sum indices directly.
+//!
+//! [`creation_operator_structure_constant`]: replicates Sage's own internal
+//! technique -- P_lambda, P_mu are built directly in the Schur basis via
+//! the Lapointe-Lascoux-Morse column-adding creation operators ([LLM1998]
+//! Cor. 4.3), not Gram-Schmidt, then multiplied via the same integer LR
+//! coefficients and converted to the P basis through a Schur<->P
+//! change-of-basis matrix that is itself creation-operator-built.
+//!
+//! All three basis transitions used along the way (monomial/Schur/
+//! homogeneous to power sums, and the integer LR coefficients) are obtained
+//! by evaluating at several integer points and solving the resulting
+//! system exactly over Q, rather than by recalling/re-deriving a
+//! combinatorial transition formula from memory.
 
 use std::collections::HashMap;
 
@@ -433,6 +448,9 @@ fn schur_coordinates_of_power_sum_vector(
     result
 }
 
+/// The sign of a permutation of `0..perm.len()`, via its inversion count
+/// parity -- used for the signed Leibniz expansion of a determinant in
+/// `creation_determinant_h_coords`.
 fn permutation_sign(perm: &[usize]) -> i32 {
     let mut inversions = 0usize;
     for i in 0..perm.len() {
@@ -919,6 +937,9 @@ fn rat_to_rf2(r: &Rat) -> RationalFunction2 {
 
 type PowerSumVector = HashMap<Partition, RationalFunction2>;
 
+/// The Macdonald inner product of two power-sum-coordinate vectors,
+/// diagonal in the power-sum basis: `<p_kappa, p_mu> = delta_{kappa,mu} *
+/// z_kappa(q,t)`.
 fn inner_product(a: &PowerSumVector, b: &PowerSumVector) -> RationalFunction2 {
     let mut total = RationalFunction2::zero();
     for (k, av) in a {
@@ -987,6 +1008,8 @@ fn compute_p_basis(n: usize) -> HashMap<Partition, PowerSumVector> {
     result
 }
 
+/// The power-sum index of `p_a * p_b`: `p_lambda * p_mu = p_{lambda merged
+/// with mu}` (concatenate the parts, drop zeros, sort descending).
 fn merge_partition_parts(a: &[usize], b: &[usize]) -> Partition {
     let mut merged: Partition = a.iter().chain(b.iter()).copied().filter(|&x| x > 0).collect();
     merged.sort_unstable_by(|x, y| y.cmp(x));
