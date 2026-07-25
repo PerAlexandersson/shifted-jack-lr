@@ -489,33 +489,9 @@ fn pseudo_remainder(f: &Poly2, g: &Poly2) -> Poly2 {
     r
 }
 
-/// Bivariate polynomial gcd via the subresultant pseudo-remainder-sequence
-/// algorithm (Collins/Brown-Traub), which stays entirely within Z[t][q]
-/// (pseudo-division plus exact division by explicitly tracked scalars in
-/// Z[t], never field division over Frac(Z[t])) and is specifically designed
-/// to keep intermediate coefficient/degree growth bounded -- unlike a plain
-/// Euclidean algorithm over Frac(Z[t])[q], which (even with content-removal
-/// after every step) blows up badly on inputs no larger than the ones this
-/// module needs to handle. See:
-/// <https://en.wikipedia.org/wiki/Polynomial_greatest_common_divisor#Subresultants>
-/// Bivariate polynomial gcd via primitive PRS: pseudo-divide (Z[t][q]-only,
-/// no field division), then immediately strip content from the remainder
-/// at every step. Simpler than full subresultant PRS (no beta_i/psi_i
-/// scalar bookkeeping to get wrong) while still avoiding the naive
-/// Euclidean-over-Frac(Z[t])[q] blowup: content-stripping after every
-/// pseudo-division keeps both degree and coefficient growth bounded.
-/// Bivariate polynomial gcd via the subresultant pseudo-remainder-sequence
-/// algorithm (Collins/Brown-Traub), which stays entirely within Z[t][q]
-/// (pseudo-division plus exact division by explicitly tracked scalars in
-/// Z[t], never field division over Frac(Z[t])). Unlike primitive PRS
-/// (strip full content after every step, which needs an expensive
-/// bivariate-polynomial content/gcd computation at every iteration),
-/// subresultant PRS cancels the pseudo-division blowup exactly via cheap
-/// scalar (beta_i/psi_i, tracked as plain Z[t] elements) bookkeeping,
-/// avoiding a full content-strip in the loop entirely. See:
-/// <https://en.wikipedia.org/wiki/Polynomial_greatest_common_divisor#Subresultants>
-/// Instrumentation for profiling where bivariate-gcd time actually goes.
-/// Enabled by the `MACDONALD_GCD_STATS` env var; see `gcd_stats_report`.
+/// Instrumentation for profiling where bivariate-gcd time actually goes,
+/// bucketed by input size. Enabled by the `MACDONALD_GCD_STATS` env var
+/// (checked once, so zero cost when unset); see `report`.
 pub mod gcd_stats {
     use std::cell::Cell;
 
@@ -527,13 +503,6 @@ pub mod gcd_stats {
         pub(super) static BUCKET_NANOS: [Cell<u128>; 5] = Default::default();
         /// Largest single call seen: (deg_q, deg_t, nanos).
         pub(super) static WORST: Cell<(usize, usize, u128)> = const { Cell::new((0, 0, 0)) };
-    }
-
-    /// Whether to log the gcds that survive hook-factor stripping and cost
-    /// a full subresultant PRS; set `MACDONALD_GCD_RESIDUALS`.
-    pub fn residual_logging_enabled() -> bool {
-        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ENABLED.get_or_init(|| std::env::var_os("MACDONALD_GCD_RESIDUALS").is_some())
     }
 
     pub fn reset() {
@@ -933,6 +902,17 @@ fn strip_common_cyclotomic_factors(
     }
 }
 
+/// Bivariate polynomial gcd. Tries a sequence of cheap structural shortcuts
+/// first (common power of q, then a rigorous modular coprimality check,
+/// then cyclotomic factor stripping bounded by that check's degree -- see
+/// `strip_common_q_power`/`provably_coprime_primitive_parts`/
+/// `strip_common_cyclotomic_factors`), falling back to the subresultant
+/// pseudo-remainder-sequence algorithm (Collins/Brown-Traub) only for
+/// whatever is left. The PRS stays entirely within Z[t][q] (pseudo-division
+/// plus exact division by explicitly tracked scalars in Z[t], never field
+/// division over Frac(Z[t])) and cancels pseudo-division's coefficient
+/// blowup via cheap beta_i/psi_i scalar bookkeeping. See:
+/// <https://en.wikipedia.org/wiki/Polynomial_greatest_common_divisor#Subresultants>
 fn poly2_gcd_inner(a: &Poly2, b: &Poly2) -> Poly2 {
     if a.is_zero() {
         return b.primitive_part_positive();
@@ -974,7 +954,6 @@ fn poly2_gcd_inner(a: &Poly2, b: &Poly2) -> Poly2 {
         }
     }
 
-    let hook_part = easy_part;
     let mut r_prev = a_star; // r_0
     let mut r_curr = b_star; // r_1
 
@@ -1014,11 +993,7 @@ fn poly2_gcd_inner(a: &Poly2, b: &Poly2) -> Poly2 {
 
         let prem = pseudo_remainder(&r_prev, &r_curr);
         if prem.is_zero() {
-            let residual = r_curr.primitive_part_positive();
-            if gcd_stats::residual_logging_enabled() && !residual.is_one() {
-                eprintln!("PRS residual gcd (missed by hook stripping): {residual}");
-            }
-            return (residual * hook_part.clone())
+            return (r_curr.primitive_part_positive() * easy_part.clone())
                 .primitive_part_positive()
                 .scale(&content);
         }

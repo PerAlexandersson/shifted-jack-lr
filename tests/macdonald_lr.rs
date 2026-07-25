@@ -181,21 +181,6 @@ fn macdonald_p_structure_constant_is_zero_off_top_degree() {
 }
 
 #[test]
-fn debug_isolated_case() {
-    let mut calculator = MacdonaldCalculator::new();
-    for (lambda, mu, nu) in [
-        (vec![3], vec![3], vec![4, 2]),
-        (vec![3], vec![3], vec![5, 1]),
-        (vec![2, 1], vec![2, 1], vec![3, 2, 1]),
-    ] {
-        let start = std::time::Instant::now();
-        let v = calculator.p_structure_constant(&lambda, &mu, &nu);
-        eprintln!("{lambda:?} x {mu:?} -> {nu:?} in {:?}", start.elapsed());
-        eprintln!("  = {v}");
-    }
-}
-
-#[test]
 #[ignore = "CreationOperator is ~650s per case; run explicitly with --ignored"]
 fn creation_operator_matches_sage_ground_truth() {
     let records = load_ground_truth();
@@ -221,36 +206,6 @@ fn creation_operator_matches_sage_ground_truth() {
             record.nu, record.lambda, record.mu, record.value, actual
         );
     }
-}
-
-#[test]
-#[ignore = "CreationOperator is ~650s per case; run explicitly with --ignored"]
-fn creation_operator_timing_on_hard_cases() {
-    let mut calculator = MacdonaldCalculator::new();
-    for (lambda, mu, nu) in [
-        (vec![3], vec![3], vec![4, 2]),
-        (vec![3], vec![3], vec![5, 1]),
-        (vec![2, 1], vec![2, 1], vec![3, 2, 1]),
-    ] {
-        let start = std::time::Instant::now();
-        let v = calculator.p_structure_constant_with(&lambda, &mu, &nu, Algorithm::CreationOperator);
-        eprintln!(
-            "CreationOperator: {lambda:?} x {mu:?} -> {nu:?} in {:?}",
-            start.elapsed()
-        );
-        eprintln!("  = {v}");
-    }
-}
-
-#[test]
-fn gcd_profile_on_hard_case() {
-    shifted_jack_lr::macdonald::gcd_stats::reset();
-    let mut calculator = MacdonaldCalculator::new();
-    let start = std::time::Instant::now();
-    let v = calculator.p_structure_constant(&[2, 1], &[2, 1], &[3, 2, 1]);
-    eprintln!("total wall clock: {:?}", start.elapsed());
-    eprintln!("{}", shifted_jack_lr::macdonald::gcd_stats::report());
-    assert!(!v.is_zero());
 }
 
 #[test]
