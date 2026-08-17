@@ -1,1 +1,4 @@
 /target/
+
+# Sage preprocesses each .sage file into a .sage.py alongside it on every run.
+*.sage.py

@@ -4,6 +4,7 @@ use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use shifted_jack_lr::macdonald::{gcd_stats, Algorithm, MacdonaldCalculator};
 use shifted_jack_lr::{
     format_partition, integer_partitions, parse_partition, partition_size, Normalization,
     Partition, RationalFunction, ShiftedJackCalculator,
@@ -94,6 +95,34 @@ enum Command {
         #[arg(long)]
         max_checks: Option<usize>,
     },
+    /// Compute one ordinary Macdonald (q,t) P-basis structure constant:
+    /// the coefficient of P_nu in P_lambda * P_mu.
+    #[command(name = "mac-lr")]
+    MacLr {
+        #[arg(long)]
+        lambda: String,
+        #[arg(long)]
+        mu: String,
+        #[arg(long)]
+        nu: String,
+        #[arg(long, value_enum, default_value_t = CliAlgorithm::Recursive)]
+        algorithm: CliAlgorithm,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Compute every nonzero coefficient in P_lambda * P_mu (Macdonald
+    /// products are homogeneous, so nu always has size |lambda|+|mu|).
+    #[command(name = "mac-lr-product")]
+    MacLrProduct {
+        #[arg(long)]
+        lambda: String,
+        #[arg(long)]
+        mu: String,
+        #[arg(long, value_enum, default_value_t = CliAlgorithm::Recursive)]
+        algorithm: CliAlgorithm,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -107,6 +136,36 @@ impl From<CliNormalization> for Normalization {
         match value {
             CliNormalization::P => Normalization::P,
             CliNormalization::J => Normalization::J,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliAlgorithm {
+    /// Box-by-box recursion, memoized. The default: fastest in general and
+    /// benefits from the cache across repeated calls.
+    Recursive,
+    /// Weighted sum over maximal chains. Kept mainly for cross-checking.
+    ChainSum,
+    /// Independent Gram-Schmidt computation in the power-sum basis.
+    BruteForce,
+    /// Gram-Schmidt P_lambda/P_mu/P_nu, multiplied via Schur-basis integer
+    /// Littlewood-Richardson coefficients.
+    SchurSandwich,
+    /// Replicates Sage's own technique (Lapointe-Lascoux-Morse creation
+    /// operators); much slower here than `Recursive` -- see
+    /// `crate::macdonald::Algorithm::CreationOperator`.
+    CreationOperator,
+}
+
+impl From<CliAlgorithm> for Algorithm {
+    fn from(value: CliAlgorithm) -> Self {
+        match value {
+            CliAlgorithm::Recursive => Algorithm::Recursive,
+            CliAlgorithm::ChainSum => Algorithm::ChainSum,
+            CliAlgorithm::BruteForce => Algorithm::BruteForce,
+            CliAlgorithm::SchurSandwich => Algorithm::SchurSandwich,
+            CliAlgorithm::CreationOperator => Algorithm::CreationOperator,
         }
     }
 }
@@ -133,6 +192,7 @@ fn main() {
 
 fn run(cli: Cli) -> Result<(), String> {
     let mut calculator = ShiftedJackCalculator::new();
+    let mut macdonald_calculator = MacdonaldCalculator::new();
     match cli.command {
         Command::Coefficient {
             lambda,
@@ -263,6 +323,98 @@ fn run(cli: Cli) -> Result<(), String> {
             max_mismatches,
             max_checks,
         } => verify_data_file(&mut calculator, &path, max_mismatches, max_checks)?,
+        Command::MacLr {
+            lambda,
+            mu,
+            nu,
+            algorithm,
+            format,
+        } => {
+            let lambda = parse_partition(&lambda)?;
+            let mu = parse_partition(&mu)?;
+            let nu = parse_partition(&nu)?;
+            let value =
+                macdonald_calculator.p_structure_constant_with(&lambda, &mu, &nu, algorithm.into());
+            match format {
+                OutputFormat::Text => {
+                    println!(
+                        "c^{}_{{{}, {}}}(q,t) = {}",
+                        format_partition(&nu),
+                        format_partition(&lambda),
+                        format_partition(&mu),
+                        value
+                    );
+                }
+                OutputFormat::Json => {
+                    println!(
+                        "{{\"lambda\":{},\"mu\":{},\"nu\":{},\"value\":\"{}\"}}",
+                        partition_json(&lambda),
+                        partition_json(&mu),
+                        partition_json(&nu),
+                        json_escape(&value.to_string())
+                    );
+                }
+            }
+        }
+        Command::MacLrProduct {
+            lambda,
+            mu,
+            algorithm,
+            format,
+        } => {
+            let lambda = parse_partition(&lambda)?;
+            let mu = parse_partition(&mu)?;
+            let size = partition_size(&lambda) + partition_size(&mu);
+            let mut terms = Vec::new();
+            for nu in integer_partitions(size) {
+                if !partition_contains(&nu, &lambda) || !partition_contains(&nu, &mu) {
+                    continue;
+                }
+                let value = macdonald_calculator.p_structure_constant_with(
+                    &lambda,
+                    &mu,
+                    &nu,
+                    algorithm.into(),
+                );
+                if !value.is_zero() {
+                    terms.push((nu, value));
+                }
+            }
+            match format {
+                OutputFormat::Text => {
+                    println!(
+                        "{} * {} (q,t)",
+                        format_partition(&lambda),
+                        format_partition(&mu)
+                    );
+                    for (nu, value) in &terms {
+                        println!("{} : {}", format_partition(nu), value);
+                    }
+                }
+                OutputFormat::Json => {
+                    let terms_json = terms
+                        .iter()
+                        .map(|(nu, value)| {
+                            format!(
+                                "{{\"nu\":{},\"value\":\"{}\"}}",
+                                partition_json(nu),
+                                json_escape(&value.to_string())
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    println!(
+                        "{{\"lambda\":{},\"mu\":{},\"terms\":[{}]}}",
+                        partition_json(&lambda),
+                        partition_json(&mu),
+                        terms_json
+                    );
+                }
+            }
+        }
+    }
+    if std::env::var_os("MACDONALD_GCD_STATS").is_some() {
+        eprint!("{}", gcd_stats::report());
     }
     Ok(())
 }
