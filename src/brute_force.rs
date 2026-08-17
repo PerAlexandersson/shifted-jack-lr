@@ -429,7 +429,11 @@ fn schur_coordinates_of_power_sum_vector(
 ) -> HashMap<Partition, RationalFunction2> {
     let c: Vec<RationalFunction2> = partitions
         .iter()
-        .map(|kappa| v.get(kappa).cloned().unwrap_or_else(RationalFunction2::zero))
+        .map(|kappa| {
+            v.get(kappa)
+                .cloned()
+                .unwrap_or_else(RationalFunction2::zero)
+        })
         .collect();
 
     let mut result = HashMap::new();
@@ -706,7 +710,10 @@ fn invert_rf2_matrix(matrix: &[Vec<RationalFunction2>]) -> Vec<Vec<RationalFunct
         })
         .collect();
     let ok = gauss_jordan_solve_rf2(&mut a, &mut identity);
-    assert!(ok, "Schur <-> P change-of-basis matrix was unexpectedly singular");
+    assert!(
+        ok,
+        "Schur <-> P change-of-basis matrix was unexpectedly singular"
+    );
     identity
 }
 
@@ -780,8 +787,8 @@ pub fn creation_operator_structure_constant(
                 let entry = product_schur
                     .entry(s_nu.clone())
                     .or_insert_with(RationalFunction2::zero);
-                let updated =
-                    entry.clone() + coeff_ab.clone() * rat_to_rf2(&Rat::from_integer(lr_coeff.clone()));
+                let updated = entry.clone()
+                    + coeff_ab.clone() * rat_to_rf2(&Rat::from_integer(lr_coeff.clone()));
                 *entry = updated;
             }
         }
@@ -879,7 +886,8 @@ pub fn schur_sandwich_structure_constant(
                 let Some(p_expansion) = s_to_p_n.get(s_nu) else {
                     continue;
                 };
-                let contribution = coeff_ab.clone() * rat_to_rf2(&Rat::from_integer(lr_coeff.clone()));
+                let contribution =
+                    coeff_ab.clone() * rat_to_rf2(&Rat::from_integer(lr_coeff.clone()));
                 for (kappa, p_coeff) in p_expansion {
                     let entry = product_ps
                         .entry(kappa.clone())
@@ -897,7 +905,10 @@ pub fn schur_sandwich_structure_constant(
 }
 
 fn factorial(n: usize) -> BigInt {
-    (1..=n).map(BigInt::from).product::<BigInt>().max(BigInt::one())
+    (1..=n)
+        .map(BigInt::from)
+        .product::<BigInt>()
+        .max(BigInt::one())
 }
 
 /// z_kappa(q,t) = z_kappa * prod_i (1-q^kappa_i)/(1-t^kappa_i), z_kappa the
@@ -913,10 +924,7 @@ fn z_qt(kappa: &[usize]) -> RationalFunction2 {
         z_int *= factorial(mult);
     }
 
-    let mut result = RationalFunction2::new(
-        Poly2::monomial(0, 0, z_int),
-        Poly2::one(),
-    );
+    let mut result = RationalFunction2::new(Poly2::monomial(0, 0, z_int), Poly2::one());
     for &k in kappa {
         let numer = Poly2::one() - Poly2::monomial(k, 0, BigInt::one());
         let denom = Poly2::one() - Poly2::monomial(0, k, BigInt::one());
@@ -1011,7 +1019,12 @@ fn compute_p_basis(n: usize) -> HashMap<Partition, PowerSumVector> {
 /// The power-sum index of `p_a * p_b`: `p_lambda * p_mu = p_{lambda merged
 /// with mu}` (concatenate the parts, drop zeros, sort descending).
 fn merge_partition_parts(a: &[usize], b: &[usize]) -> Partition {
-    let mut merged: Partition = a.iter().chain(b.iter()).copied().filter(|&x| x > 0).collect();
+    let mut merged: Partition = a
+        .iter()
+        .chain(b.iter())
+        .copied()
+        .filter(|&x| x > 0)
+        .collect();
     merged.sort_unstable_by(|x, y| y.cmp(x));
     merged
 }
@@ -1057,7 +1070,9 @@ pub fn brute_force_structure_constant(
                 continue;
             }
             let merged = merge_partition_parts(k1, k2);
-            let entry = product.entry(merged).or_insert_with(RationalFunction2::zero);
+            let entry = product
+                .entry(merged)
+                .or_insert_with(RationalFunction2::zero);
             let updated = entry.clone() + c1.clone() * c2.clone();
             *entry = updated;
         }
@@ -1149,10 +1164,7 @@ mod tests {
         // J[2]   = (-q*t+t^2+q-t)*s[1,1] + (q*t^2-q*t-t+1)*s[2]
         let j11 = j_lambda_in_schur(&[1, 1]);
         assert_eq!(j11.len(), 1);
-        assert_eq!(
-            j11[&vec![1, 1]],
-            parse_test_rf("t^3 - t^2 - t + 1")
-        );
+        assert_eq!(j11[&vec![1, 1]], parse_test_rf("t^3 - t^2 - t + 1"));
 
         let j2 = j_lambda_in_schur(&[2]);
         assert_eq!(j2.len(), 2);
@@ -1170,9 +1182,7 @@ mod tests {
         assert_eq!(j3.len(), 3);
         assert_eq!(
             j3[&vec![1, 1, 1]],
-            parse_test_rf(
-                "-q^3*t + q^2*t^2 + q^3 - q^2*t + q*t^2 - t^3 - q*t + t^2"
-            )
+            parse_test_rf("-q^3*t + q^2*t^2 + q^3 - q^2*t + q*t^2 - t^3 - q*t + t^2")
         );
         assert_eq!(
             j3[&vec![2, 1]],
@@ -1182,9 +1192,7 @@ mod tests {
         );
         assert_eq!(
             j3[&vec![3]],
-            parse_test_rf(
-                "-q^3*t^3 + q^3*t^2 + q^2*t^2 - q^2*t + q*t^2 - q*t - t + 1"
-            )
+            parse_test_rf("-q^3*t^3 + q^3*t^2 + q^2*t^2 - q^2*t + q*t^2 - q*t - t + 1")
         );
 
         // [2, 1] -> (q*t^3-t^4-q*t^2+t^3-q*t+t^2+q-t)*s[1,1,1]
@@ -1420,7 +1428,10 @@ mod tests {
         assert_eq!(m21[&vec![3]], -Rat::one());
 
         let m111 = &transition[&vec![1, 1, 1]];
-        assert_eq!(m111[&vec![1, 1, 1]], Rat::new(BigInt::one(), BigInt::from(6)));
+        assert_eq!(
+            m111[&vec![1, 1, 1]],
+            Rat::new(BigInt::one(), BigInt::from(6))
+        );
         assert_eq!(m111[&vec![2, 1]], -Rat::new(BigInt::one(), BigInt::from(2)));
         assert_eq!(m111[&vec![3]], Rat::new(BigInt::one(), BigInt::from(3)));
     }

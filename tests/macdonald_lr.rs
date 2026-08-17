@@ -61,16 +61,14 @@ fn parse_expr(input: &str) -> Poly2 {
     }
     terms.push((negative, input[start..].trim()));
 
-    terms
-        .into_iter()
-        .fold(Poly2::zero(), |acc, (neg, term)| {
-            let value = parse_term(term);
-            if neg {
-                acc - value
-            } else {
-                acc + value
-            }
-        })
+    terms.into_iter().fold(Poly2::zero(), |acc, (neg, term)| {
+        let value = parse_term(term);
+        if neg {
+            acc - value
+        } else {
+            acc + value
+        }
+    })
 }
 
 /// Parses a single term, e.g. `"q^3*t^2"` or `"4"` or `"q"`, into a `Poly2`.
@@ -172,9 +170,7 @@ fn macdonald_p_structure_constant_is_zero_off_top_degree() {
     // degree |lambda| + |mu|, so any nu of a different size must be zero --
     // true regardless of q, t, so this holds no matter how the coefficient
     // is computed.
-    assert!(calculator
-        .p_structure_constant(&[1], &[1], &[1])
-        .is_zero());
+    assert!(calculator.p_structure_constant(&[1], &[1], &[1]).is_zero());
     assert!(calculator
         .p_structure_constant(&[2], &[1], &[1, 1, 1, 1])
         .is_zero());

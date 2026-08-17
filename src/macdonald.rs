@@ -30,8 +30,9 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 
 use crate::{
     add_box_to_partition, conjugate_partition, gt_chain_from_tableau, int_poly_gcd,
-    partition_size, remove_box_from_partition, semistandard_tableaux, skew_shape_contains,
-    trim_partition, normalize_two, normalize_three, IntPoly, Partition, RationalFunction,
+    normalize_three, normalize_two, partition_size, remove_box_from_partition,
+    semistandard_tableaux, skew_shape_contains, trim_partition, IntPoly, Partition,
+    RationalFunction,
 };
 
 /// A polynomial in q and t with integer coefficients, stored as a
@@ -88,7 +89,10 @@ impl Poly2 {
     }
 
     fn coeff(&self, degree: usize) -> IntPoly {
-        self.coeffs.get(degree).cloned().unwrap_or_else(IntPoly::zero)
+        self.coeffs
+            .get(degree)
+            .cloned()
+            .unwrap_or_else(IntPoly::zero)
     }
 
     /// The gcd (as a polynomial in t) of the q-coefficients: the "content"
@@ -170,7 +174,11 @@ impl Poly2 {
     }
 
     #[cfg(test)]
-    fn evaluate(&self, q: &num_rational::Ratio<BigInt>, t: &num_rational::Ratio<BigInt>) -> num_rational::Ratio<BigInt> {
+    fn evaluate(
+        &self,
+        q: &num_rational::Ratio<BigInt>,
+        t: &num_rational::Ratio<BigInt>,
+    ) -> num_rational::Ratio<BigInt> {
         use num_rational::Ratio;
         let mut total = Ratio::from_integer(BigInt::from(0));
         let mut q_pow = Ratio::from_integer(BigInt::from(1));
@@ -199,7 +207,12 @@ impl Poly2 {
         if factor.is_zero() {
             return Self::zero();
         }
-        Self::new(self.coeffs.iter().map(|c| c.clone() * factor.clone()).collect())
+        Self::new(
+            self.coeffs
+                .iter()
+                .map(|c| c.clone() * factor.clone())
+                .collect(),
+        )
     }
 
     /// Multiplies by `q^degree`.
@@ -421,10 +434,20 @@ fn rf_coeffs_to_poly2_exact(coeffs: &[RationalFunction]) -> Poly2 {
 /// ones) must use this instead.
 fn intpoly_gcd_z(a: &IntPoly, b: &IntPoly) -> IntPoly {
     if a.is_zero() {
-        return b.primitive_part_positive();
+        let degree = b.degree().expect("the nonzero gcd input has a degree");
+        return if b.coeff(degree).is_negative() {
+            -b.clone()
+        } else {
+            b.clone()
+        };
     }
     if b.is_zero() {
-        return a.primitive_part_positive();
+        let degree = a.degree().expect("the nonzero gcd input has a degree");
+        return if a.coeff(degree).is_negative() {
+            -a.clone()
+        } else {
+            a.clone()
+        };
     }
     let int_content = a.content_abs().gcd(&b.content_abs());
     let poly_content = int_poly_gcd(&a.primitive_part_positive(), &b.primitive_part_positive());
@@ -529,7 +552,13 @@ pub mod gcd_stats {
             worst.1,
             worst.2 as f64 / 1e9,
         );
-        let labels = ["deg_q 0-1", "deg_q 2-3", "deg_q 4-7", "deg_q 8-15", "deg_q 16+"];
+        let labels = [
+            "deg_q 0-1",
+            "deg_q 2-3",
+            "deg_q 4-7",
+            "deg_q 8-15",
+            "deg_q 16+",
+        ];
         for i in 0..5 {
             let c = BUCKET_CALLS.with(|b| b[i].get());
             let n = BUCKET_NANOS.with(|b| b[i].get());
@@ -681,7 +710,10 @@ fn divides_mod(divisor: &[u64], target: &[u64], p: u64) -> bool {
 /// Reduces a `Poly2` to a univariate polynomial over F_p by evaluating t
 /// at `t0`, as a coefficient vector indexed by q-degree.
 fn poly2_reduce_mod(p2: &Poly2, t0: u64, p: u64) -> Vec<u64> {
-    p2.coeffs.iter().map(|c| eval_intpoly_mod(c, t0, p)).collect()
+    p2.coeffs
+        .iter()
+        .map(|c| eval_intpoly_mod(c, t0, p))
+        .collect()
 }
 
 /// gcd(a_star, b_star) reduced at t = t0 over F_p, together with the t0
@@ -836,24 +868,30 @@ fn provably_coprime_primitive_parts(a_star: &Poly2, b_star: &Poly2) -> bool {
 }
 
 fn max_t_degree(p: &Poly2) -> usize {
-    p.coeffs.iter().filter_map(|c| c.degree()).max().unwrap_or(0)
+    p.coeffs
+        .iter()
+        .filter_map(|c| c.degree())
+        .max()
+        .unwrap_or(0)
 }
 
 /// Repeatedly strips irreducible factors of the form `Phi_d(q^alpha t^beta)`
 /// common to both inputs, returning their product and dividing them out.
 ///
-/// This is the structural shortcut. Every denominator this module builds is
-/// a product of Macdonald hook factors `1 - q^a t^b` (they come from
-/// `c_poly`/`c_prime_poly`, `z_qt`'s `(1-q^k)/(1-t^k)`, and the normalizing
-/// factors -- and sums preserve the shape, a common denominator being just
-/// the union of the factors). Such a factor is generally reducible:
+/// This is a structural shortcut for the hook-derived part of a denominator.
+/// Many denominator factors in this module are Macdonald hook factors
+/// `1 - q^a t^b`, coming from `c_poly`/`c_prime_poly`, `z_qt`'s
+/// `(1-q^k)/(1-t^k)`, and the normalizing factors. Such a factor is generally
+/// reducible:
 /// `1 - u^g = prod_{d | g} Phi_d(u)` for `u = q^alpha t^beta`, so a shared
 /// divisor can be any of those cyclotomic pieces -- `1 - q^2` contributing a
 /// bare `1 + q`, for instance. Enumerating the `Phi_d` directly therefore
 /// subsumes enumerating the hook factors (`Phi_1(u) = u - 1`) while also
 /// catching the pieces, and each candidate costs one linear-time trial
 /// division instead of a subresultant PRS whose Z[t] coefficients blow up
-/// multiplicatively.
+/// multiplicatively. Recursion divisors such as `norm(nu)-norm(mu)` can be
+/// genuinely multi-term and non-cyclotomic when `nu/mu` spans several rows;
+/// this shortcut deliberately leaves those residual factors to the exact PRS.
 ///
 /// `gcd_image` (the true gcd's image mod p at t = t0) bounds the search:
 /// only candidates whose own image divides it can possibly be factors, and
@@ -898,10 +936,12 @@ fn strip_common_cyclotomic_factors(
                     if !divides_mod(&poly2_reduce_mod(&candidate, t0, p), gcd_image, p) {
                         continue;
                     }
-                    let Some(quotient_a) = try_exact_divide_unit_constant(a_star, &candidate) else {
+                    let Some(quotient_a) = try_exact_divide_unit_constant(a_star, &candidate)
+                    else {
                         continue;
                     };
-                    let Some(quotient_b) = try_exact_divide_unit_constant(b_star, &candidate) else {
+                    let Some(quotient_b) = try_exact_divide_unit_constant(b_star, &candidate)
+                    else {
                         continue;
                     };
                     *a_star = quotient_a;
@@ -960,8 +1000,8 @@ fn poly2_gcd_inner(a: &Poly2, b: &Poly2) -> Poly2 {
         if gcd_image.len() <= 1 {
             return easy_part.primitive_part_positive().scale(&content);
         }
-        easy_part = easy_part
-            * strip_common_cyclotomic_factors(&mut a_star, &mut b_star, &gcd_image, t0);
+        easy_part =
+            easy_part * strip_common_cyclotomic_factors(&mut a_star, &mut b_star, &gcd_image, t0);
         // Stripping can expose a fresh common power of q.
         let extra = strip_common_q_power(&mut a_star, &mut b_star);
         easy_part = easy_part * Poly2::monomial(extra, 0, BigInt::one());
@@ -1001,8 +1041,8 @@ fn poly2_gcd_inner(a: &Poly2, b: &Poly2) -> Poly2 {
             // `pow_intpoly`'s unit special-case rather than needing d_prev
             // >= 1 unconditionally.
             let neg_gamma_prev = -gamma_prev.clone();
-            let psi_i = pow_intpoly(&neg_gamma_prev, d_prev)
-                .exact_div(&pow_intpoly(&psi_prev, d_prev - 1));
+            let psi_i =
+                pow_intpoly(&neg_gamma_prev, d_prev).exact_div(&pow_intpoly(&psi_prev, d_prev - 1));
             let beta_i = -(gamma_prev.clone() * pow_intpoly(&psi_i, d_i));
             (beta_i, psi_i)
         };
@@ -1058,8 +1098,7 @@ fn poly2_exact_div(a: &Poly2, divisor: &Poly2) -> Poly2 {
     if check == *a {
         return raw;
     }
-    let (check_scale, remainder) =
-        poly2_leading_bigint(&check).div_rem(&poly2_leading_bigint(a));
+    let (check_scale, remainder) = poly2_leading_bigint(&check).div_rem(&poly2_leading_bigint(a));
     assert!(
         remainder.is_zero(),
         "poly2_exact_div: non-integer correction scale"
@@ -1067,6 +1106,18 @@ fn poly2_exact_div(a: &Poly2, divisor: &Poly2) -> Poly2 {
     let corrected = raw.div_by_intpoly_exact(&IntPoly::monomial(0, check_scale));
     debug_assert_eq!(corrected.clone() * divisor.clone(), *a);
     corrected
+}
+
+/// Cancels the full common factor of two integer bivariate polynomials.
+/// Keeping this operation separate lets rational multiplication cancel
+/// across numerator/denominator pairs before forming much larger products.
+fn cancel_common_factor(a: Poly2, b: Poly2) -> (Poly2, Poly2) {
+    let common = poly2_gcd(&a, &b);
+    if common.is_one() {
+        (a, b)
+    } else {
+        (poly2_exact_div(&a, &common), poly2_exact_div(&b, &common))
+    }
 }
 
 /// An exact rational function in q and t, always kept in canonical lowest
@@ -1133,13 +1184,37 @@ impl RationalFunction2 {
         self.numerator.is_zero()
     }
 
+    /// Builds from coprime numerator/denominator parts. This is used after
+    /// cross-cancellation in multiplication and division: since both inputs
+    /// are already canonical, cancelling gcd(a,d) and gcd(c,b) leaves the
+    /// two resulting products coprime in the UFD Z[q,t].
+    fn from_coprime_parts(numerator: Poly2, mut denominator: Poly2) -> Self {
+        assert!(!denominator.is_zero(), "zero denominator");
+        if numerator.is_zero() {
+            return Self::zero();
+        }
+        let mut numerator = numerator;
+        if denominator.leading_sign_negative() {
+            numerator = -numerator;
+            denominator = -denominator;
+        }
+        Self {
+            numerator,
+            denominator,
+        }
+    }
+
     /// Swaps q and t throughout (see [`Poly2::swap_qt`]).
     pub(crate) fn swap_qt(&self) -> Self {
         Self::new(self.numerator.swap_qt(), self.denominator.swap_qt())
     }
 
     #[cfg(test)]
-    fn evaluate(&self, q: &num_rational::Ratio<BigInt>, t: &num_rational::Ratio<BigInt>) -> num_rational::Ratio<BigInt> {
+    fn evaluate(
+        &self,
+        q: &num_rational::Ratio<BigInt>,
+        t: &num_rational::Ratio<BigInt>,
+    ) -> num_rational::Ratio<BigInt> {
         self.numerator.evaluate(q, t) / self.denominator.evaluate(q, t)
     }
 }
@@ -1187,10 +1262,12 @@ impl Mul for RationalFunction2 {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self {
-        Self::new(
-            self.numerator * rhs.numerator,
-            self.denominator * rhs.denominator,
-        )
+        if self.is_zero() || rhs.is_zero() {
+            return Self::zero();
+        }
+        let (a, d) = cancel_common_factor(self.numerator, rhs.denominator);
+        let (c, b) = cancel_common_factor(rhs.numerator, self.denominator);
+        Self::from_coprime_parts(a * c, b * d)
     }
 }
 
@@ -1199,10 +1276,12 @@ impl std::ops::Div for RationalFunction2 {
 
     fn div(self, rhs: Self) -> Self {
         assert!(!rhs.numerator.is_zero(), "division by zero");
-        Self::new(
-            self.numerator * rhs.denominator,
-            self.denominator * rhs.numerator,
-        )
+        if self.is_zero() {
+            return Self::zero();
+        }
+        let (a, c) = cancel_common_factor(self.numerator, rhs.numerator);
+        let (d, b) = cancel_common_factor(rhs.denominator, self.denominator);
+        Self::from_coprime_parts(a * d, b * c)
     }
 }
 
@@ -1239,7 +1318,8 @@ fn b_macdonald(arm: usize, leg: usize) -> RationalFunction2 {
 /// single-parameter Jack hook ratio.
 fn macdonald_psi_qt(lambda_in: &[usize], mu_in: &[usize]) -> RationalFunction2 {
     let [lambda, mu] = normalize_two(lambda_in, mu_in);
-    let [lambdac, muc] = normalize_two(&conjugate_partition(lambda_in), &conjugate_partition(mu_in));
+    let [lambdac, muc] =
+        normalize_two(&conjugate_partition(lambda_in), &conjugate_partition(mu_in));
     let mut product = RationalFunction2::one();
 
     for r in 0..mu.len() {
@@ -1273,8 +1353,10 @@ fn adjacent_binomial_coefficient(bigger_in: &[usize], smaller_in: &[usize]) -> R
     let c0 = smaller[r0] + 1;
     debug_assert_eq!(bigger[r0], smaller[r0] + 1);
 
-    let [bigger_c, smaller_c] =
-        normalize_two(&conjugate_partition(&bigger), &conjugate_partition(&smaller));
+    let [bigger_c, smaller_c] = normalize_two(
+        &conjugate_partition(&bigger),
+        &conjugate_partition(&smaller),
+    );
 
     let mut product = RationalFunction2::one();
 
@@ -1300,8 +1382,8 @@ fn adjacent_binomial_coefficient(bigger_in: &[usize], smaller_in: &[usize]) -> R
         let leg_b = bigger_c[c - 1] - r0 - 1;
         let arm_s = smaller[r0] - c;
         let leg_s = smaller_c[c - 1] - r0 - 1;
-        product =
-            product * RationalFunction2::new(c_prime_poly(arm_b, leg_b), c_prime_poly(arm_s, leg_s));
+        product = product
+            * RationalFunction2::new(c_prime_poly(arm_b, leg_b), c_prime_poly(arm_s, leg_s));
     }
 
     let prefactor = RationalFunction2::new(Poly2::one(), Poly2::monomial(0, r0, BigInt::one()));
@@ -1510,7 +1592,8 @@ fn weighted_chain_sum_structure_constant(
                     denom = denom * (norms[j].clone() - norms[i].clone());
                 }
             }
-            let b_j = shifted_macdonald_evaluate(lambda, &chain[j], n) / normalizing_factor(lambda, n);
+            let b_j =
+                shifted_macdonald_evaluate(lambda, &chain[j], n) / normalizing_factor(lambda, n);
             wt = wt + (numerator.clone() / denom) * b_j;
         }
 
@@ -1703,9 +1786,7 @@ impl MacdonaldCalculator {
             .max(1);
 
         let unital = match algorithm {
-            Algorithm::Recursive => {
-                unital_h_structure_constant(&mut self.cache, lambda, mu, nu, n)
-            }
+            Algorithm::Recursive => unital_h_structure_constant(&mut self.cache, lambda, mu, nu, n),
             Algorithm::ChainSum => weighted_chain_sum_structure_constant(lambda, mu, nu, n),
             Algorithm::BruteForce | Algorithm::SchurSandwich | Algorithm::CreationOperator => {
                 unreachable!("handled above")
@@ -1730,6 +1811,8 @@ impl MacdonaldCalculator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::integer_partitions;
+    use num_rational::Ratio;
 
     fn q() -> Poly2 {
         Poly2::q()
@@ -1737,6 +1820,126 @@ mod tests {
 
     fn t() -> Poly2 {
         Poly2::t()
+    }
+
+    /// Classical Littlewood--Richardson tableaux, implemented only for an
+    /// independent q=t specialization check. Cells are filled in reverse
+    /// row-reading order, so the row/column and lattice-word conditions can
+    /// all be checked on each prefix.
+    fn classical_lr_coefficient(lambda: &[usize], mu: &[usize], nu: &[usize]) -> usize {
+        let lambda = trim_partition(lambda);
+        let mu = trim_partition(mu);
+        let nu = trim_partition(nu);
+        if !skew_shape_contains(&nu, &lambda)
+            || partition_size(&nu) != partition_size(&lambda) + partition_size(&mu)
+        {
+            return 0;
+        }
+
+        let mut cells = Vec::new();
+        for (r, &row_len) in nu.iter().enumerate() {
+            let inner_len = lambda.get(r).copied().unwrap_or(0);
+            for c in (inner_len..row_len).rev() {
+                cells.push((r, c));
+            }
+        }
+
+        fn fill(
+            index: usize,
+            cells: &[(usize, usize)],
+            lambda: &[usize],
+            mu: &[usize],
+            values: &mut HashMap<(usize, usize), usize>,
+            used: &mut [usize],
+        ) -> usize {
+            if index == cells.len() {
+                return usize::from(used == mu);
+            }
+            let (r, c) = cells[index];
+            let mut total = 0;
+            for value in 1..=mu.len() {
+                if used[value - 1] == mu[value - 1] {
+                    continue;
+                }
+                if let Some(&right) = values.get(&(r, c + 1)) {
+                    if value > right {
+                        continue;
+                    }
+                }
+                if r > 0
+                    && c >= lambda.get(r - 1).copied().unwrap_or(0)
+                    && values.get(&(r - 1, c)).is_some_and(|&above| value <= above)
+                {
+                    continue;
+                }
+
+                used[value - 1] += 1;
+                let lattice = (0..used.len().saturating_sub(1)).all(|i| used[i] >= used[i + 1]);
+                if lattice {
+                    values.insert((r, c), value);
+                    total += fill(index + 1, cells, lambda, mu, values, used);
+                    values.remove(&(r, c));
+                }
+                used[value - 1] -= 1;
+            }
+            total
+        }
+
+        fill(
+            0,
+            &cells,
+            &lambda,
+            &mu,
+            &mut HashMap::new(),
+            &mut vec![0; mu.len()],
+        )
+    }
+
+    #[test]
+    fn p_basis_specializes_to_classical_lr_when_q_equals_t() {
+        let value = Ratio::from_integer(BigInt::from(2));
+        let factors: Vec<Partition> = (1..=3).flat_map(integer_partitions).collect();
+        let mut calculator = MacdonaldCalculator::new();
+
+        for (i, lambda) in factors.iter().enumerate() {
+            for mu in &factors[i..] {
+                for nu in integer_partitions(partition_size(lambda) + partition_size(mu)) {
+                    let expected = classical_lr_coefficient(lambda, mu, &nu);
+                    let actual = calculator
+                        .p_structure_constant(lambda, mu, &nu)
+                        .evaluate(&value, &value);
+                    assert_eq!(
+                        actual,
+                        Ratio::from_integer(BigInt::from(expected)),
+                        "q=t specialization for {lambda:?} x {mu:?} -> {nu:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn recursive_matches_gram_schmidt_for_all_outputs_through_factor_size_two() {
+        let factors: Vec<Partition> = (1..=2).flat_map(integer_partitions).collect();
+        let mut calculator = MacdonaldCalculator::new();
+
+        for (i, lambda) in factors.iter().enumerate() {
+            for mu in &factors[i..] {
+                for nu in integer_partitions(partition_size(lambda) + partition_size(mu)) {
+                    let recursive = calculator.p_structure_constant(lambda, mu, &nu);
+                    let gram_schmidt = calculator.p_structure_constant_with(
+                        lambda,
+                        mu,
+                        &nu,
+                        Algorithm::BruteForce,
+                    );
+                    assert_eq!(
+                        recursive, gram_schmidt,
+                        "algorithm cross-check for {lambda:?} x {mu:?} -> {nu:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1755,9 +1958,7 @@ mod tests {
         );
         assert_eq!(
             hook_c_product_qt(&[3]),
-            (Poly2::one() - t())
-                * (Poly2::one() - q() * t())
-                * (Poly2::one() - q() * q() * t())
+            (Poly2::one() - t()) * (Poly2::one() - q() * t()) * (Poly2::one() - q() * q() * t())
         );
         assert_eq!(
             hook_c_product_qt(&[2, 1]),
@@ -1765,9 +1966,7 @@ mod tests {
         );
         assert_eq!(
             hook_c_product_qt(&[1, 1, 1]),
-            (Poly2::one() - t())
-                * (Poly2::one() - t() * t())
-                * (Poly2::one() - t() * t() * t())
+            (Poly2::one() - t()) * (Poly2::one() - t() * t()) * (Poly2::one() - t() * t() * t())
         );
     }
 
@@ -1791,10 +1990,26 @@ mod tests {
         let bv = b.evaluate(&q_val, &t_val);
         let cv = c.evaluate(&q_val, &t_val);
 
-        assert_eq!((a.clone() + b.clone()).evaluate(&q_val, &t_val), &av + &bv, "add");
-        assert_eq!((a.clone() - b.clone()).evaluate(&q_val, &t_val), &av - &bv, "sub");
-        assert_eq!((a.clone() * b.clone()).evaluate(&q_val, &t_val), &av * &bv, "mul");
-        assert_eq!((a.clone() / b.clone()).evaluate(&q_val, &t_val), &av / &bv, "div");
+        assert_eq!(
+            (a.clone() + b.clone()).evaluate(&q_val, &t_val),
+            &av + &bv,
+            "add"
+        );
+        assert_eq!(
+            (a.clone() - b.clone()).evaluate(&q_val, &t_val),
+            &av - &bv,
+            "sub"
+        );
+        assert_eq!(
+            (a.clone() * b.clone()).evaluate(&q_val, &t_val),
+            &av * &bv,
+            "mul"
+        );
+        assert_eq!(
+            (a.clone() / b.clone()).evaluate(&q_val, &t_val),
+            &av / &bv,
+            "div"
+        );
 
         // 2 rounds, not more: repeated multiplication by `a` with no
         // opportunity for cancellation is a genuinely adversarial
@@ -1809,7 +2024,11 @@ mod tests {
         for _ in 0..2 {
             acc = acc * a.clone() + b.clone() * c.clone() - a.clone() / c.clone();
             acc_val = acc_val * &av + &bv * &cv - &av / &cv;
-            assert_eq!(acc.evaluate(&q_val, &t_val), acc_val, "chained accumulation");
+            assert_eq!(
+                acc.evaluate(&q_val, &t_val),
+                acc_val,
+                "chained accumulation"
+            );
         }
     }
 
@@ -2139,7 +2358,10 @@ mod tests {
             ($name:expr, $symbolic:expr, $numeric:expr) => {
                 let sv = e(&$symbolic);
                 if sv != $numeric {
-                    eprintln!("MISMATCH at {}: symbolic={} numeric={}", $name, sv, $numeric);
+                    eprintln!(
+                        "MISMATCH at {}: symbolic={} numeric={}",
+                        $name, sv, $numeric
+                    );
                 } else {
                     eprintln!("ok at {}: {}", $name, sv);
                 }
@@ -2199,7 +2421,11 @@ mod tests {
 
         eprintln!("sum12 = {sum12}");
         eprintln!("sum34 = {sum34}");
-        eprintln!("sum12 denom degq={} sum34 denom degq={}", sum12.denominator.coeffs.len(), sum34.denominator.coeffs.len());
+        eprintln!(
+            "sum12 denom degq={} sum34 denom degq={}",
+            sum12.denominator.coeffs.len(),
+            sum34.denominator.coeffs.len()
+        );
 
         let g = poly2_gcd(&sum12.denominator, &sum34.denominator);
         eprintln!("gcd(denom12,denom34) = {g}");
@@ -2209,8 +2435,14 @@ mod tests {
         // internal assert (which is what we're trying to falsify).
         let (_, rem1) = rf_poly_div_rem(sum12.denominator.to_rf_coeffs(), g.to_rf_coeffs());
         let (_, rem2) = rf_poly_div_rem(sum34.denominator.to_rf_coeffs(), g.to_rf_coeffs());
-        eprintln!("rem1 all zero: {}", rem1.iter().all(RationalFunction::is_zero));
-        eprintln!("rem2 all zero: {}", rem2.iter().all(RationalFunction::is_zero));
+        eprintln!(
+            "rem1 all zero: {}",
+            rem1.iter().all(RationalFunction::is_zero)
+        );
+        eprintln!(
+            "rem2 all zero: {}",
+            rem2.iter().all(RationalFunction::is_zero)
+        );
 
         let diff = sum12.clone() - sum34.clone();
         eprintln!("diff (sum12-sum34) evaluated = {}", e(&diff));
@@ -2271,8 +2503,14 @@ mod tests {
         // Round-trip check: quotient * common should reproduce the input, exactly (as Poly2).
         let recovered_num = quotient_num.clone() * common.clone();
         let recovered_den = quotient_den.clone() * common.clone();
-        eprintln!("recovered_num == num_after_content: {}", recovered_num == num_after_content);
-        eprintln!("recovered_den == den_after_content: {}", recovered_den == den_after_content);
+        eprintln!(
+            "recovered_num == num_after_content: {}",
+            recovered_num == num_after_content
+        );
+        eprintln!(
+            "recovered_den == den_after_content: {}",
+            recovered_den == den_after_content
+        );
         if recovered_num != num_after_content {
             eprintln!("recovered_num = {recovered_num}");
         }
@@ -2289,6 +2527,15 @@ mod tests {
         let pp = p.primitive_part_positive();
         eprintln!("p.primitive_part_positive() = {pp}");
         assert_eq!(format!("{pp}"), "q*t - 1");
+    }
+
+    #[test]
+    fn intpoly_gcd_z_preserves_content_when_one_input_is_zero() {
+        let p = IntPoly::new(vec![BigInt::from(32), BigInt::from(32)]);
+        assert_eq!(intpoly_gcd_z(&IntPoly::zero(), &p), p);
+
+        let negative = IntPoly::new(vec![BigInt::from(-32), BigInt::from(-32)]);
+        assert_eq!(intpoly_gcd_z(&negative, &IntPoly::zero()), p);
     }
 
     #[test]
@@ -2394,10 +2641,34 @@ mod tests {
         let b = RationalFunction2::new(Poly2::one(), q() + Poly2::one());
         // 1/(q-1) + 1/(q+1) = 2q / (q^2 - 1)
         let sum = a + b;
-        let expected = RationalFunction2::new(
-            Poly2::from_i64(2) * q(),
-            q() * q() - Poly2::one(),
-        );
+        let expected = RationalFunction2::new(Poly2::from_i64(2) * q(), q() * q() - Poly2::one());
         assert_eq!(sum, expected);
+    }
+
+    #[test]
+    fn rational_function2_cross_cancellation_matches_naive_reduction() {
+        let p1 = q() + t() + Poly2::one();
+        let p2 = q() * t() + q() + Poly2::from_i64(2);
+        let p3 = q() * q() + t() + Poly2::from_i64(3);
+        let p4 = q() + t() * t() + Poly2::from_i64(5);
+
+        let a = RationalFunction2::new(p1.clone() * p2.clone(), p3.clone());
+        let b = RationalFunction2::new(p3.clone(), p2.clone() * p4.clone());
+
+        let naive_product = RationalFunction2::new(
+            a.numerator.clone() * b.numerator.clone(),
+            a.denominator.clone() * b.denominator.clone(),
+        );
+        assert_eq!(a.clone() * b.clone(), naive_product);
+        assert_eq!(
+            a.clone() * b.clone(),
+            RationalFunction2::new(p1.clone(), p4.clone())
+        );
+
+        let naive_quotient = RationalFunction2::new(
+            a.numerator.clone() * b.denominator.clone(),
+            a.denominator.clone() * b.numerator.clone(),
+        );
+        assert_eq!(a / b, naive_quotient);
     }
 }

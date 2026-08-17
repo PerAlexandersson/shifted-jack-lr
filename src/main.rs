@@ -4,7 +4,7 @@ use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use shifted_jack_lr::macdonald::{Algorithm, MacdonaldCalculator};
+use shifted_jack_lr::macdonald::{gcd_stats, Algorithm, MacdonaldCalculator};
 use shifted_jack_lr::{
     format_partition, integer_partitions, parse_partition, partition_size, Normalization,
     Partition, RationalFunction, ShiftedJackCalculator,
@@ -333,12 +333,8 @@ fn run(cli: Cli) -> Result<(), String> {
             let lambda = parse_partition(&lambda)?;
             let mu = parse_partition(&mu)?;
             let nu = parse_partition(&nu)?;
-            let value = macdonald_calculator.p_structure_constant_with(
-                &lambda,
-                &mu,
-                &nu,
-                algorithm.into(),
-            );
+            let value =
+                macdonald_calculator.p_structure_constant_with(&lambda, &mu, &nu, algorithm.into());
             match format {
                 OutputFormat::Text => {
                     println!(
@@ -386,7 +382,11 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             match format {
                 OutputFormat::Text => {
-                    println!("{} * {} (q,t)", format_partition(&lambda), format_partition(&mu));
+                    println!(
+                        "{} * {} (q,t)",
+                        format_partition(&lambda),
+                        format_partition(&mu)
+                    );
                     for (nu, value) in &terms {
                         println!("{} : {}", format_partition(nu), value);
                     }
@@ -412,6 +412,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
             }
         }
+    }
+    if std::env::var_os("MACDONALD_GCD_STATS").is_some() {
+        eprint!("{}", gcd_stats::report());
     }
     Ok(())
 }
