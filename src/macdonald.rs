@@ -116,12 +116,20 @@ impl Poly2 {
             if c.is_zero() {
                 continue;
             }
-            int_content = int_content.gcd(&c.content_abs());
-            let primitive = c.primitive_part_positive();
-            poly_content = Some(match poly_content {
-                None => primitive,
-                Some(acc) => int_poly_gcd(&acc, &primitive),
-            });
+            if !int_content.is_one() {
+                int_content = int_content.gcd(&c.content_abs());
+            }
+            if !poly_content.as_ref().is_some_and(IntPoly::is_one) {
+                let primitive = c.primitive_part_positive();
+                poly_content = Some(match poly_content {
+                    None => primitive,
+                    Some(acc) => int_poly_gcd(&acc, &primitive),
+                });
+            }
+            // Both components only decrease under further gcds.
+            if int_content.is_one() && poly_content.as_ref().is_some_and(IntPoly::is_one) {
+                return IntPoly::one();
+            }
         }
         match poly_content {
             None => IntPoly::zero(),
@@ -148,10 +156,14 @@ impl Poly2 {
             return Self::zero();
         }
         let content = self.content_t();
+        self.primitive_part_positive_with_content(&content)
+    }
+
+    fn primitive_part_positive_with_content(&self, content: &IntPoly) -> Self {
         let mut result = if content.is_one() {
             self.clone()
         } else {
-            self.div_by_intpoly_exact(&content)
+            self.div_by_intpoly_exact(content)
         };
         if result.leading_sign_negative() {
             result = -result;
@@ -579,6 +591,9 @@ pub mod gcd_stats {
 /// algorithm): records call counts/timings into `gcd_stats` when enabled,
 /// otherwise adds nothing over calling it directly.
 fn poly2_gcd(a: &Poly2, b: &Poly2) -> Poly2 {
+    if a.is_one() || b.is_one() {
+        return Poly2::one();
+    }
     static STATS_ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *STATS_ENABLED.get_or_init(|| std::env::var_os("MACDONALD_GCD_STATS").is_some()) {
         let start = std::time::Instant::now();
@@ -613,19 +628,26 @@ fn poly2_gcd(a: &Poly2, b: &Poly2) -> Poly2 {
     poly2_gcd_inner(a, b)
 }
 
-/// A prime just under 2^31, so products of two residues fit comfortably in
-/// u128 and residues fit in u64.
+/// A prime just under 2^31, so products of two residues fit in u64.
 const GCD_FILTER_PRIME: u64 = 2_147_483_647;
 
 /// `x mod p`, normalized into `0..p` (BigInt's `%` can return a negative
 /// remainder for a negative `x`).
 fn bigint_mod_u64(x: &BigInt, p: u64) -> u64 {
-    let modulus = BigInt::from(p);
-    let mut r = x % &modulus;
+    if let Some(value) = x.to_i64() {
+        return value.rem_euclid(p as i64) as u64;
+    }
+    let mut r = x % p;
     if r.is_negative() {
-        r += &modulus;
+        r += p;
     }
     r.to_u64().expect("a residue mod p always fits in u64")
+}
+
+#[inline]
+fn mod_mul(a: u64, b: u64, p: u64) -> u64 {
+    debug_assert!(a < p && b < p && p <= u32::MAX as u64);
+    a * b % p
 }
 
 /// Evaluates a polynomial in t at `t0`, in F_p (Horner).
@@ -635,7 +657,7 @@ fn eval_intpoly_mod(poly: &IntPoly, t0: u64, p: u64) -> u64 {
     };
     let mut acc = 0u64;
     for d in (0..=degree).rev() {
-        acc = (acc as u128 * t0 as u128 % p as u128) as u64;
+        acc = mod_mul(acc, t0, p);
         acc = (acc + bigint_mod_u64(&poly.coeff(d), p)) % p;
     }
     acc
@@ -647,9 +669,9 @@ fn mod_pow(mut base: u64, mut exponent: u64, p: u64) -> u64 {
     base %= p;
     while exponent > 0 {
         if exponent & 1 == 1 {
-            result = (result as u128 * base as u128 % p as u128) as u64;
+            result = mod_mul(result, base, p);
         }
-        base = (base as u128 * base as u128 % p as u128) as u64;
+        base = mod_mul(base, base, p);
         exponent >>= 1;
     }
     result
@@ -671,11 +693,10 @@ fn univariate_gcd_mod(mut a: Vec<u64>, mut b: Vec<u64>, p: u64) -> Vec<u64> {
     while !b.is_empty() {
         let inverse = mod_pow(*b.last().expect("nonempty"), p - 2, p);
         while !a.is_empty() && a.len() >= b.len() {
-            let factor =
-                (*a.last().expect("nonempty") as u128 * inverse as u128 % p as u128) as u64;
+            let factor = mod_mul(*a.last().expect("nonempty"), inverse, p);
             let shift = a.len() - b.len();
             for (i, &bc) in b.iter().enumerate() {
-                let sub = (factor as u128 * bc as u128 % p as u128) as u64;
+                let sub = mod_mul(factor, bc, p);
                 a[i + shift] = (a[i + shift] + p - sub) % p;
             }
             trim_mod_poly(&mut a);
@@ -696,10 +717,10 @@ fn divides_mod(divisor: &[u64], target: &[u64], p: u64) -> bool {
     trim_mod_poly(&mut rem);
     let inverse = mod_pow(*divisor.last().expect("nonempty"), p - 2, p);
     while !rem.is_empty() && rem.len() >= divisor.len() {
-        let factor = (*rem.last().expect("nonempty") as u128 * inverse as u128 % p as u128) as u64;
+        let factor = mod_mul(*rem.last().expect("nonempty"), inverse, p);
         let shift = rem.len() - divisor.len();
         for (i, &dc) in divisor.iter().enumerate() {
-            let sub = (factor as u128 * dc as u128 % p as u128) as u64;
+            let sub = mod_mul(factor, dc, p);
             rem[i + shift] = (rem[i + shift] + p - sub) % p;
         }
         trim_mod_poly(&mut rem);
@@ -976,14 +997,19 @@ fn poly2_gcd_inner(a: &Poly2, b: &Poly2) -> Poly2 {
     if b.is_zero() {
         return a.primitive_part_positive();
     }
+    if a.is_one() || b.is_one() {
+        return Poly2::one();
+    }
 
     // Standard Gauss's-lemma decomposition: gcd(a,b) = gcd(cont(a),cont(b))
     // * gcd(pp(a),pp(b)), where cont/pp are with respect to q. The content
     // factor is reincorporated (by direct multiplication, not re-stripped)
     // once the primitive-part gcd is found below.
-    let content = intpoly_gcd_z(&a.content_t(), &b.content_t());
-    let mut a_star = a.primitive_part_positive();
-    let mut b_star = b.primitive_part_positive();
+    let content_a = a.content_t();
+    let content_b = b.content_t();
+    let content = intpoly_gcd_z(&content_a, &content_b);
+    let mut a_star = a.primitive_part_positive_with_content(&content_a);
+    let mut b_star = b.primitive_part_positive_with_content(&content_b);
     if a_star.deg_q() < b_star.deg_q() {
         std::mem::swap(&mut a_star, &mut b_star);
     }
@@ -1112,6 +1138,9 @@ fn poly2_exact_div(a: &Poly2, divisor: &Poly2) -> Poly2 {
 /// Keeping this operation separate lets rational multiplication cancel
 /// across numerator/denominator pairs before forming much larger products.
 fn cancel_common_factor(a: Poly2, b: Poly2) -> (Poly2, Poly2) {
+    if a == b {
+        return (Poly2::one(), Poly2::one());
+    }
     let common = poly2_gcd(&a, &b);
     if common.is_one() {
         (a, b)
@@ -1138,16 +1167,15 @@ impl RationalFunction2 {
                 denominator: Poly2::one(),
             };
         }
+        if numerator == denominator {
+            return Self::one();
+        }
 
         let mut numerator = numerator;
         let mut denominator = denominator;
-
-        let content_gcd = intpoly_gcd_z(&numerator.content_t(), &denominator.content_t());
-        if !content_gcd.is_one() {
-            numerator = numerator.div_by_intpoly_exact(&content_gcd);
-            denominator = denominator.div_by_intpoly_exact(&content_gcd);
-        }
-
+        // `poly2_gcd` already includes the coefficient-content gcd in its
+        // Gauss-lemma decomposition, so a separate content pass here would
+        // duplicate the most frequent part of normalization.
         let common = poly2_gcd(&numerator, &denominator);
         if !common.is_one() {
             numerator = poly2_exact_div(&numerator, &common);
@@ -1820,6 +1848,30 @@ mod tests {
 
     fn t() -> Poly2 {
         Poly2::t()
+    }
+
+    #[test]
+    fn modular_arithmetic_matches_bigint_remainders() {
+        let p = GCD_FILTER_PRIME;
+        for &a in &[0, 1, 2, p / 2, p - 1] {
+            for &b in &[0, 1, 3, p / 2, p - 1] {
+                assert_eq!(mod_mul(a, b, p), (a as u128 * b as u128 % p as u128) as u64);
+            }
+        }
+
+        let modulus = BigInt::from(p);
+        for value in [
+            BigInt::from(-1),
+            BigInt::from(i64::MIN),
+            (BigInt::one() << 100usize) + BigInt::from(12345),
+            -((BigInt::one() << 100usize) + BigInt::from(12345)),
+        ] {
+            let mut expected = &value % &modulus;
+            if expected.is_negative() {
+                expected += &modulus;
+            }
+            assert_eq!(bigint_mod_u64(&value, p), expected.to_u64().unwrap());
+        }
     }
 
     /// Classical Littlewood--Richardson tableaux, implemented only for an
